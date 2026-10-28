@@ -127,3 +127,16 @@ Settings are read inline from `~/.config/omarchy/shell.json` inside the `plugins
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
+
+## Omarchy 4.5 per-monitor workspaces
+
+This fork reads Omarchy's `monitor-workspaces` state file and gives each
+monitor its own workspace grid numbered 1–10. Keyboard navigation, scrolling,
+window filtering, and workspace selection use the same saved monitor assignment.
+Workspaces visiting from disconnected monitors appear after the local ten.
+Explicit `overview.useWorkspaceMap` offsets remain configurable.
+
+The companion [Workspace Navigator](https://github.com/nidalJaafar/omarchy-workspace-navigator)
+provides bar buttons and hover previews using the same monitor model. Its
+`tests/check.cjs` validates mapping, grid placement, and navigation against
+this checkout when `OMARCHY_OVERVIEW_PATH` is set to this repository.

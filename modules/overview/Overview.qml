@@ -185,21 +185,17 @@ Scope {
 
                     // Helper: compute current group bounds
                     const workspacesPerGroup = Config.options.overview.rows * Config.options.overview.columns;
-                    const currentId = Hyprland.focusedMonitor?.activeWorkspace?.id ?? 1;
-                    const useWorkspaceMap = Config.options.overview.useWorkspaceMap;
-                    const workspaceMap = Config.options.overview.workspaceMap ?? [];
-                    const focusedMonitorId = Hyprland.focusedMonitor?.id ?? root.monitor?.id ?? 0;
-                    const workspaceOffset = useWorkspaceMap ? Number(workspaceMap[focusedMonitorId] ?? 0) : 0;
-                    const currentGroup = Math.floor((currentId - workspaceOffset - 1) / workspacesPerGroup);
-                    const minWorkspaceId = currentGroup * workspacesPerGroup + 1 + workspaceOffset;
-                    const maxWorkspaceId = minWorkspaceId + workspacesPerGroup - 1;
+                    const widget = overviewLoader.item;
+                    if (!widget) return;
+                    const currentId = widget.effectiveActiveWorkspaceId;
+                    const visibleIds = widget.visibleWorkspaceIds;
 
                     const rows = Config.options.overview.rows;
                     const columns = Config.options.overview.columns;
                     const reverseColumns = Config.options.overview.orderRightLeft;
                     const reverseRows = Config.options.overview.orderBottomUp;
 
-                    const clampedIndex = Math.max(0, Math.min(workspacesPerGroup - 1, currentId - minWorkspaceId));
+                    const clampedIndex = Math.max(0, Math.min(workspacesPerGroup - 1, visibleIds.indexOf(currentId)));
                     const currentNormalRow = Math.floor(clampedIndex / columns);
                     const currentNormalColumn = clampedIndex % columns;
 
@@ -240,12 +236,12 @@ Scope {
                     else if (event.key >= Qt.Key_1 && event.key <= Qt.Key_9) {
                         const position = event.key - Qt.Key_0; // 1-9
                         if (position <= workspacesPerGroup) {
-                            targetId = minWorkspaceId + position - 1;
+                            targetId = visibleIds[position - 1] ?? null;
                         }
                     } else if (event.key === Qt.Key_0) {
                         // 0 = 10th workspace in the group (if group has 10+ workspaces)
                         if (workspacesPerGroup >= 10) {
-                            targetId = minWorkspaceId + 9; // 10th position = offset 9
+                            targetId = visibleIds[9] ?? null; // 10th position = offset 9
                         }
                     }
 
@@ -257,16 +253,11 @@ Scope {
                     )) {
                         const targetNormalRow = toNormalRow(targetVisualRow);
                         const targetNormalColumn = toNormalColumn(targetVisualColumn);
-                        targetId = minWorkspaceId + targetNormalRow * columns + targetNormalColumn;
+                        targetId = visibleIds[targetNormalRow * columns + targetNormalColumn] ?? null;
                     }
 
                     if (targetId !== null) {
-                        const clampedTarget = Math.max(minWorkspaceId, Math.min(maxWorkspaceId, targetId));
-			if (Hyprland.usingLua) {
-				Hyprland.dispatch(`hl.dsp.focus({workspace = '${clampedTarget}'})`);
-			} else {
-				Hyprland.dispatch("workspace " + clampedTarget);
-			}
+                        widget.focusWorkspace(targetId);
                         event.accepted = true;
                     }
                 }

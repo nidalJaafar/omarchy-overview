@@ -17,12 +17,27 @@ Item {
     readonly property var appLibrary: shell?.appLibrary ?? null
     readonly property HyprlandMonitor monitor: Hyprland.monitorFor(panelWindow.screen)
     readonly property var toplevels: ToplevelManager.toplevels
-    readonly property int effectiveActiveWorkspaceId: Math.max(1, Math.min(100, monitor?.activeWorkspace?.id ?? 1))
+    readonly property int effectiveActiveWorkspaceId: Math.max(1, monitor?.activeWorkspace?.id ?? 1)
     readonly property int workspacesShown: Config.options.overview.rows * Config.options.overview.columns
     readonly property bool useWorkspaceMap: Config.options.overview.useWorkspaceMap
     readonly property var workspaceMap: Config.options.overview.workspaceMap
-    readonly property int workspaceOffset: useWorkspaceMap ? Number(workspaceMap[root.monitor?.id] ?? 0) : 0
-    readonly property int workspaceGroup: Math.floor((effectiveActiveWorkspaceId - workspaceOffset - 1) / workspacesShown)
+    readonly property int workspaceOffset: useWorkspaceMap ? Number(workspaceMap[root.monitor?.id] ?? 0) : MonitorWorkspaces.offsetFor(monitor)
+    readonly property var monitorWorkspaceIds: MonitorWorkspaces.idsFor(monitor, workspaceOffset, HyprlandData.workspaces)
+    readonly property int workspaceGroup: Math.floor(Math.max(0, monitorWorkspaceIds.indexOf(effectiveActiveWorkspaceId)) / workspacesShown)
+    readonly property var visibleWorkspaceIds: monitorWorkspaceIds.slice(workspaceGroup * workspacesShown, (workspaceGroup + 1) * workspacesShown)
+
+    function focusWorkspace(id) {
+        if (id <= 0) return;
+        if (Hyprland.usingLua) {
+            const slot = id - workspaceOffset;
+            if (slot >= 1 && slot <= 10)
+                Hyprland.dispatch(`o.workspaces.focus(${slot}, "${monitor.name}")`);
+            else
+                Hyprland.dispatch(`hl.dsp.focus({workspace = '${id}'})`);
+        } else {
+            Hyprland.dispatch(`workspace ${id}`);
+        }
+    }
     property bool monitorIsFocused: (Hyprland.focusedMonitor?.name == monitor.name)
     property var windows: HyprlandData.windowList
     property var windowByAddress: HyprlandData.windowByAddress
@@ -166,7 +181,7 @@ Item {
     function getWorkspaceRow(workspaceId) {
         if (!Number.isFinite(workspaceId))
             return 0;
-        const adjusted = workspaceId - workspaceOffset;
+        const adjusted = Math.max(0, monitorWorkspaceIds.indexOf(workspaceId)) + 1;
         const normalRow = Math.floor((adjusted - 1) / Config.options.overview.columns) % Config.options.overview.rows;
         return Config.options.overview.orderBottomUp ? (Config.options.overview.rows - normalRow - 1) : normalRow;
     }
@@ -186,7 +201,7 @@ Item {
     function getWorkspaceColumn(workspaceId) {
         if (!Number.isFinite(workspaceId))
             return 0;
-        const adjusted = workspaceId - workspaceOffset;
+        const adjusted = Math.max(0, monitorWorkspaceIds.indexOf(workspaceId)) + 1;
         const normalCol = (adjusted - 1) % Config.options.overview.columns;
         return Config.options.overview.orderRightLeft ? (Config.options.overview.columns - normalCol - 1) : normalCol;
     }
@@ -194,34 +209,16 @@ Item {
     function getWorkspaceInCell(rowIndex, colIndex) {
         const mappedRow = Config.options.overview.orderBottomUp ? (Config.options.overview.rows - rowIndex - 1) : rowIndex;
         const mappedCol = Config.options.overview.orderRightLeft ? (Config.options.overview.columns - colIndex - 1) : colIndex;
-        return (workspaceGroup * workspacesShown) + (mappedRow * Config.options.overview.columns) + mappedCol + 1 + workspaceOffset;
+        return visibleWorkspaceIds[mappedRow * Config.options.overview.columns + mappedCol] ?? -1;
     }
 
     function stepWorkspace(delta) {
         if (!Number.isFinite(delta) || delta === 0)
             return;
 
-        const currentId = monitor?.activeWorkspace?.id ?? effectiveActiveWorkspaceId;
-        const minWorkspaceId = workspaceOffset + 1;
-        let maxWorkspaceId = minWorkspaceId + workspacesShown - 1;
-        for (const workspaceId of (workspaceIds ?? [])) {
-            if (Number.isFinite(workspaceId) && workspaceId >= minWorkspaceId) {
-                maxWorkspaceId = Math.max(maxWorkspaceId, workspaceId);
-            }
-        }
-        maxWorkspaceId = Math.max(maxWorkspaceId, currentId);
-
-        let targetId = currentId + delta;
-        if (targetId < minWorkspaceId) {
-            targetId = maxWorkspaceId;
-        } else if (targetId > maxWorkspaceId) {
-            targetId = minWorkspaceId;
-        }
-        if (Hyprland.usingLua) {
-            Hyprland.dispatch(`hl.dsp.focus({workspace = '${targetId}'})`);
-        } else {
-            Hyprland.dispatch(`workspace ${targetId}`);
-        }
+        const ids = monitorWorkspaceIds;
+        const currentIndex = Math.max(0, ids.indexOf(effectiveActiveWorkspaceId));
+        root.focusWorkspace(ids[(currentIndex + delta + ids.length) % ids.length]);
     }
 
     function isSpecialWorkspace(windowData) {
@@ -336,12 +333,10 @@ Item {
         if (!Config.options.overview.hideEmptyRows) return null;
 
         let rows = new Set();
-        const firstWorkspace = root.workspaceGroup * root.workspacesShown + 1 + workspaceOffset;
-        const lastWorkspace = (root.workspaceGroup + 1) * root.workspacesShown + workspaceOffset;
 
         // Add row containing current workspace
         const currentWorkspace = effectiveActiveWorkspaceId;
-        if (currentWorkspace >= firstWorkspace && currentWorkspace <= lastWorkspace) {
+        if (visibleWorkspaceIds.includes(currentWorkspace)) {
             rows.add(getWorkspaceRow(currentWorkspace));
         }
 
@@ -349,7 +344,7 @@ Item {
         for (let addr in windowByAddress) {
             const win = windowByAddress[addr];
             const wsId = win?.workspace?.id;
-            if (wsId >= firstWorkspace && wsId <= lastWorkspace) {
+            if (visibleWorkspaceIds.includes(wsId)) {
                 const rowIndex = getWorkspaceRow(wsId);
                 rows.add(rowIndex);
             }
@@ -426,6 +421,7 @@ Item {
                             id: workspace
                             property int colIndex: index
                             property int workspaceValue: root.getWorkspaceInCell(rowIndex, colIndex)
+                            visible: workspaceValue > 0
                             property bool showWallpaper: root.hasEmptyWorkspaceWallpaper
                             property bool hasWindows: root.workspaceHasWindows(workspaceValue)
                             property color defaultWorkspaceColor: "transparent"
@@ -491,7 +487,7 @@ Item {
                             StyledText {
                                 anchors.centerIn: parent
                                 visible: !workspace.showWallpaper
-                                text: workspaceValue
+                                text: ((workspaceValue - 1) % 10) + 1
                                 font {
                                     pixelSize: root.workspaceNumberSize * root.scale
                                     weight: Font.DemiBold
@@ -509,11 +505,7 @@ Item {
                                 onClicked: {
                                     if (root.draggingTargetWorkspace === -1) {
                                         GlobalStates.overviewOpen = false
-                                        if (Hyprland.usingLua) {
-                                            Hyprland.dispatch(`hl.dsp.focus({workspace = '${workspaceValue}'})`);
-                                        } else {
-                                            Hyprland.dispatch(`workspace ${workspaceValue}`)
-                                        }
+                                        root.focusWorkspace(workspaceValue);
                                     }
                                 }
                             }
@@ -1001,9 +993,7 @@ Item {
                             var win = windowByAddress[address]
                             if (root.isSpecialWorkspace(win))
                                 return false;
-                            const minWorkspace = root.workspaceGroup * root.workspacesShown + 1 + workspaceOffset;
-                            const maxWorkspace = (root.workspaceGroup + 1) * root.workspacesShown + workspaceOffset;
-                            const inWorkspaceGroup = (minWorkspace <= win?.workspace?.id && win?.workspace?.id <= maxWorkspace)
+                            const inWorkspaceGroup = root.visibleWorkspaceIds.includes(win?.workspace?.id)
                             return inWorkspaceGroup;
                         }).sort((a, b) => {
                             // Proper stacking order based on Hyprland's window properties
