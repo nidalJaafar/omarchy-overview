@@ -15,7 +15,7 @@ A Hyprland workspace overview plugin with live window previews, seamless theme i
 Install directly from GitHub using the Omarchy plugin CLI:
 
 ```bash
-omarchy plugin add https://github.com/AyushKr2003/omarchy-overview.git
+omarchy plugin add https://github.com/nidalJaafar/omarchy-overview.git --enable
 ```
 
 ---
